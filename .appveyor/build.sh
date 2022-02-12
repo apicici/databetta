@@ -12,3 +12,4 @@ unzip lsqlite3.zip
 cd "lsqlite3_${LSQLITE_UUID}"
 
 luarocks make "lsqlite3complete-${LSQLITE_VER}.rockspec" --no-install --lua-version 5.1
+mv lsqlite3complete.so ../
