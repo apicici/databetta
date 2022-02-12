@@ -8,7 +8,7 @@ build_script:
   - bash .appveyor/build.sh
 
 after_build:
-  - appveyor PushArtifact lsqlite3complete.dylib
+  - appveyor PushArtifact lsqlite3complete.so
 
 deploy:
   - provider: GitHub
