@@ -12,7 +12,9 @@ table_flags = im.love.TableFlags(
     "Resizable",
     "RowBg",
     "Borders",
-    "SizingFixedFit"
+    "SizingFixedFit",
+    "ScrollX",
+    "ScrollY"
 )
 
 Tab = Class {

@@ -2,9 +2,9 @@ local im
 
 love.load = () ->
     -- add the source base directory to package.cpath to accees shared libraries from there 
-    extension = jit.os == "Windows" and "dll" or jit.os == "Linux" and "so" or jit.os == "OSX" and "dylib" or nil
     base_dir = love.filesystem.getSourceBaseDirectory()
-    package.cpath = string.format("%s/?.%s;%s", base_dir, extension, package.cpath)
+    package.cpath = string.format("%s/?.%s;%s", base_dir, "dylib", package.cpath)
+    package.cpath = string.format("%s/?.%s;%s", base_dir, "so", package.cpath)
 
     require "settings"
     im = require "cimgui"
