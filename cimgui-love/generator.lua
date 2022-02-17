@@ -19,7 +19,7 @@ local data = tmpfile:read("*all")
 tmpfile:close()
 
 local cdef = {
-    'require("ffi").cdef[[',
+    'require("ffi").cdef[[\ntypedef struct FILE FILE;',
     data:gsub("#.-\n", ""),
     ']]'
 }
