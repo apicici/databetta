@@ -202,23 +202,30 @@ M.documenti = Class {
         Tab.load(self, page)
         db = global.database
         for row in *@table
-            for name, sql_table in pairs(combo_parents)
-                s = db\prepare("SELECT Nome FROM '#{sql_table}' WHERE ID = ?")
-                s\bind_values(row[name])
-                custom = s\step() == sqlite.ROW and s\get_value(0) or nil
-                row[name] = {value:row[name], custom: custom}
-                s\finalize()
-            for name, t in pairs(multi_parents)
-                a, b = "'#{t.names}'", "'#{t.doc}'"
-                sql = "SELECT #{a}.Nome FROM #{a} INNER JOIN #{b} ON #{a}.ID = #{b}.ID WHERE #{b}.DocID = ?"
-                s = db\prepare(sql)
-                s\bind_values(row.ID)
-                custom = {}
-                while s\step() == sqlite.ROW
-                    custom[#custom + 1] = s\get_value(0)
-                row[name] = {value:row[name], custom: custom}
-                s\finalize()
-           
+            for name in *@headers
+                if sql_table = combo_parents[name]
+                    s = db\prepare("SELECT Nome FROM '#{sql_table}' WHERE ID = ?")
+                    s\bind_values(row[name])
+                    custom = s\step() == sqlite.ROW and s\get_value(0) or nil
+                    row[name] = {value:row[name], custom: custom}
+                    s\finalize()
+                elseif t = multi_parents[name]
+                    a, b = "'#{t.names}'", "'#{t.doc}'"
+                    sql = "SELECT #{a}.Nome FROM #{a} INNER JOIN #{b} ON #{a}.ID = #{b}.ID WHERE #{b}.DocID = ?"
+                    s = db\prepare(sql)
+                    s\bind_values(row.ID)
+                    custom = {}
+                    while s\step() == sqlite.ROW
+                        custom[#custom + 1] = s\get_value(0)
+                    row[name] = {value:row[name], custom: custom}
+                    s\finalize()
+                else
+                    text = row[name] or ""
+                    m = text\match("(.-)\n")
+                    custom = m and m .. "..." or text
+                    row[name] = {value:text, custom: custom}
+
+
     removeRow: (i) =>
         ID = @table[i].ID
         db = global.database

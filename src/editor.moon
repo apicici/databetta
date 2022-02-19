@@ -3,10 +3,12 @@ global = require "global"
 ffi = require "ffi"
 tabs = require "tabs"
 sqlite = require "lsqlite3complete"
+text_editor = require "text_editor"
+
 M = {}
 
 step = ffi.new("int[1]", 1)
-local date, buffer
+local date
 combo = {}
 combo.parents = {
     "Paese": "Paesi"
@@ -24,22 +26,54 @@ multi.parents = {
 }
 multi.show_all = true
 
-
 clip = (x, a, b) ->
     x < a and a or x > b and b or x
+
+multiline_placeholder = ->
+    style = im.GetStyle()
+    im.PushStyleColor_Vec4(im.ImGuiCol_ChildBg, style.Colors[im.ImGuiCol_FrameBg])
+    im.PushStyleVar_Float(im.ImGuiStyleVar_ChildRounding, style.FrameRounding)
+    im.PushStyleVar_Float(im.ImGuiStyleVar_ChildBorderSize, style.FrameBorderSize)
+    im.PushStyleVar_Vec2(im.ImGuiStyleVar_WindowPadding, style.FramePadding)
+    im.BeginChild_Str("##text", im.ImVec2_Float(-1, -200*global.scale_p[0]), nil, im.ImGuiWindowFlags_AlwaysUseWindowPadding)
+   
+    pos = im.GetWindowPos()
+    size = im.GetWindowSize()
+    text_editor\set_sizes(pos.x, pos.y, size.x, size.y, style.FramePadding.x, style.FramePadding.y, style.ScrollbarSize, im.GetScrollY())
+    im.Dummy(im.ImVec2_Float(text_editor.w, text_editor.full_height))
+
+    hovered =  im.IsWindowHovered()
+    focused = im.IsWindowFocused()
+
+    im.SetMouseCursor(im.ImGuiMouseCursor_TextInput) if hovered
+    text_editor\set_focus(focused)
+    
+    io = im.GetIO()
+    if hovered and io.MouseClicked[0]
+        text_editor\mouseclicked(io.MousePos.x, io.MousePos.y)
+
+    if focused and io.MouseReleased[0]
+        text_editor\mousereleased(io.MousePos.x, io.MousePos.y, io.MouseClickedLastCount[0] > 1)
+    
+    if focused and im.IsMouseDragging(0)
+        text_editor\mousemoved(io.MousePos.x, io.MousePos.y)
+    
+    im.EndChild()
+    im.PopStyleColor()
+    im.PopStyleVar(3)
 
 draw_text = () ->
     tab = global.current_tab
     cell = tab.cell_selected
     if not cell.initialised
-        buffer = ffi.new("char[200]", cell.value or "")
+        text_editor\set_text(cell.value or "")
         cell.initialised = true
-        
-    im.InputTextMultiline("##text", buffer, 200)
+
+    multiline_placeholder()
     if im.Button("Applica")
         sql = string.format("UPDATE '%s' SET [%s] = ? WHERE ID = ?", tab.sql_table, cell.name)
         s = global.database\prepare(sql)
-        s\bind_values(ffi.string(buffer), cell.ID)
+        s\bind_values(text_editor\get_text(), cell.ID)
         s\step()
         s\finalize()
         global.changed = true
@@ -167,6 +201,7 @@ documenti_draw = (name) ->
             im.TextDisabled("Editor non impostato per questa cella.")
 
 M.draw = ->
+    text_editor\set_sizes()
     tab = global.current_tab
     return if not global.current_tab
 

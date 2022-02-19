@@ -5,6 +5,7 @@ serialization = require "serialization"
 settings = require "settings"
 tabs = require "tabs"
 editor = require "editor"
+text_editor = require "text_editor"
 ffi = require "ffi"
 
 io = im.GetIO()
@@ -29,6 +30,7 @@ rescale = (s) ->
     config.SizePixels = 13*s
     io.FontDefault = io.Fonts\AddFontDefault(config)
     im.love.BuildFontAtlas()
+    text_editor\set_scale(s)
 
 global.scale_p = ffi.new("int[1]", settings.t.scale)
 scale_p = global.scale_p
@@ -166,4 +168,6 @@ love.draw = ->
     im.love.RenderDrawLists()
 
     rescale(scale_p[0]) if rescale_needed
+
+    text_editor\draw()
 
