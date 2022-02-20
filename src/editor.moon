@@ -50,12 +50,12 @@ multiline_placeholder = ->
     
     io = im.GetIO()
     if hovered and io.MouseClicked[0]
-        text_editor\mouseclicked(io.MousePos.x, io.MousePos.y)
+        text_editor\mouseclicked(io.MousePos.x, io.MousePos.y, io.MouseDoubleClicked[0])
 
     if focused and io.MouseReleased[0]
-        text_editor\mousereleased(io.MousePos.x, io.MousePos.y, io.MouseClickedLastCount[0] > 1)
+        text_editor\mousereleased(io.MousePos.x, io.MousePos.y)
     
-    if focused and im.IsMouseDragging(0)
+    if focused and im.IsMouseDragging(0) and io.MouseClickedLastCount[0] < 2
         text_editor\mousemoved(io.MousePos.x, io.MousePos.y)
     
     im.EndChild()

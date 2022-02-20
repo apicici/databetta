@@ -1,14 +1,19 @@
 global = require "global"
 ffi = require "ffi"
 utf8 = require("utf8")
+Class = require "class"
+
+local *
 
 love.graphics.setDefaultFilter("nearest", "nearest")
 love.keyboard.setKeyRepeat(true)
 
 FONT_SIZE = 16
+MAX_HISTORY = 200
 
 M = {
     t: 0
+    history: {}
 }
 
 clip = (x, a, b) ->
@@ -30,6 +35,7 @@ M.set_sizes = (x, y, w, h, px, py, scrollbar, @scroll) =>
 
 M.set_text = (@text) =>
     @w = 0
+    @history = {}
 
 M.set_padding = () =>
 M.set_focus = (@focused) =>
@@ -121,145 +127,199 @@ M.draw = () =>
 M.update = (dt) =>
     @t = math.fmod(@t + dt, 1)
 
-M.mouseclicked = (x, y) =>
+M.mouseclicked = (x, y, double) =>
     @cursor = @find_position(x, y)
     @pos = @cursor_to_pos(@cursor)
     @end_cursor, @end_pos = nil
     @t = 0
+    @released = false
+
+    if double
+        p = utf8.offset(@text, @pos)
+        if s2 = @text\sub(p)\match("^%S+")
+            s1 = @text\sub(1, p - 1)\match("%S*$")
+            @end_pos = @pos + utf8.len(s2)
+            @end_cursor = @pos_to_cur(@end_pos)
+            @pos -= utf8.len(s1)
+            @cursor = @pos_to_cur(@pos)
 
 M.mousemoved = (x, y) =>
     @end_cursor = @find_position(clip(x, @x, @x + @w), clip(y, @y, @y + @h))
     @end_pos =  @cursor_to_pos(@end_cursor)
 
 M.mousereleased = (x, y, double) =>
+    @released = true
     if @end_pos == @pos
         @end_cursor, @end_pos = nil
-
-    -- if t > 0.2
-    --     end_cursor = @find_position(clip(x, 0, @w), clip(y, 0, @h))
-    -- print("released", x, y, t, double)
-
+        
 M.keypressed = (key, isrepeat) =>
+    return unless @released
     switch key
         when "return", "kpenter"
             if @end_cursor
+                @add_to_history(Replace(@pos, @end_pos, "\n", @get_chars(@pos, @end_pos)))
                 @replace(@pos, @end_pos, "\n")
             else
-                @insert_string("\n")
+                @add_to_history(Insert(@pos, "\n"))
+                @insert_string(@pos, "\n")
         when "backspace"
             if @end_cursor
-                @delete(@pos, @end_pos)
-            else
-                p = utf8.offset(@text, @pos)
-                @text = @text\sub(1, p - 2) .. @text\sub(p)
-                @wrap_text()
-                @pos = math.max(@pos - 1, 1)
-                @cursor = @pos_to_cur(@pos)
+                @add_to_history(Replace(@pos, @end_pos, "", @get_chars(@pos, @end_pos)))
+                @replace(@pos, @end_pos, "")
+            elseif @pos > 1
+                char =  @get_chars(@pos - 1)
+                subtype = switch char
+                    when " "
+                        "space"
+                    when "\n"
+                        nil
+                    else
+                        "other"
+                if subtype and @history.num_next == 0 and @history.current and @history.current.__class == Delete_backspace and @history.current.type == subtype
+                    @history.current\add_char(char)
+                else
+                    @add_to_history(Delete_backspace(@pos, char, subtype))
+                @delete_backspace(@pos, 1)
         when "delete"
             if @end_cursor
-                @delete(@pos, @end_pos)
-            else
-                p = utf8.offset(@text, @pos)
-                @text = @text\sub(1, p - 1) .. @text\sub(p + 1)
-                @wrap_text()
-                @cursor = @pos_to_cur(@pos)
+                @add_to_history(Replace(@pos, @end_pos, "", @get_chars(@pos, @end_pos)))
+                @replace(@pos, @end_pos, "")
+            elseif @pos <= utf8.len(@text)
+                char =  @get_chars(@pos)
+                subtype = switch char
+                    when " "
+                        "space"
+                    when "\n"
+                        nil
+                    else
+                        "other"
+                if subtype and @history.num_next == 0 and @history.current and @history.current.__class == Delete_delete and @history.current.type == subtype
+                    @history.current\add_char(char)
+                else
+                    @add_to_history(Delete_delete(@pos, char, subtype))
+                @delete_delete(@pos, 1)
         when "left"
-            cursor = @cursor.cursor - 1
-            if cursor < 0
-                if line = @wrappedtext[@cursor.line - 1]
-                    line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
-                    @cursor.cursor = line_len
-                    @cursor.line -= 1
-                else
-                    @cursor.cursor = 0
+            if @end_cursor
+                @pos = math.min(@pos, @end_pos)
+                @cursor = @pos_to_cur(@pos)
+                @end_cursor, @end_pos = nil
             else
-                @cursor.cursor = cursor
-            @pos = @cursor_to_pos(@cursor)
+                cursor = @cursor.cursor - 1
+                if cursor < 0
+                    if line = @wrappedtext[@cursor.line - 1]
+                        line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
+                        @cursor.cursor = line_len
+                        @cursor.line -= 1
+                    else
+                        @cursor.cursor = 0
+                else
+                    @cursor.cursor = cursor
+                @pos = @cursor_to_pos(@cursor)
         when "right"
-            cursor = @cursor.cursor + 1
-            line = @wrappedtext[@cursor.line]
-            line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
-            if cursor > line_len
-                if @cursor.line < #@wrappedtext
-                    @cursor.cursor = 0
-                    @cursor.line += 1
-                else
-                    @cursor.cursor = line_len
+            if @end_cursor
+                @pos = math.max(@pos, @end_pos)
+                @cursor = @pos_to_cur(@pos)
+                @end_cursor, @end_pos = nil
             else
-                @cursor.cursor = cursor
-            @pos = @cursor_to_pos(@cursor)
+                cursor = @cursor.cursor + 1
+                line = @wrappedtext[@cursor.line]
+                line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
+                if cursor > line_len
+                    if @cursor.line < #@wrappedtext
+                        @cursor.cursor = 0
+                        @cursor.line += 1
+                    else
+                        @cursor.cursor = line_len
+                else
+                    @cursor.cursor = cursor
+                @pos = @cursor_to_pos(@cursor)
         when "up"
-            if line = @wrappedtext[@cursor.line - 1]
+            first_cursor = @end_pos and @end_pos < @pos and @end_cursor or @cursor
+            if line = @wrappedtext[first_cursor.line - 1]
                 line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
                 @cursor.line -= 1
-                @cursor.cursor = math.min(@cursor.cursor, line_len)
+                @cursor.cursor = math.min(first_cursor.cursor, line_len)
                 @pos = @cursor_to_pos(@cursor)
+                @end_cursor, @end_pos = nil
         when "down"
-            if line = @wrappedtext[@cursor.line + 1]
+            last_cursor = @end_pos and @end_pos > @pos and @end_cursor or @cursor
+            if line = @wrappedtext[last_cursor.line + 1]
                 line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
                 @cursor.line += 1
-                @cursor.cursor = math.min(@cursor.cursor, line_len)
+                @cursor.cursor = math.min(last_cursor.cursor, line_len)
                 @pos = @cursor_to_pos(@cursor)
+                @end_cursor, @end_pos = nil
         when "home"
             @cursor.cursor = 0
             @pos = @cursor_to_pos(@cursor)
+            @end_cursor, @end_pos = nil
         when "end"
             line = @wrappedtext[@cursor.line]
             line_len = utf8.len(line) - (line\sub(-1) == "\n" and 1 or 0)
             @cursor.cursor = line_len
             @pos = @cursor_to_pos(@cursor)
-        when "lctrl", "rctrl", "lgui", "rgui", "c", "v"
-            return if isrepeat
+            @end_cursor, @end_pos = nil
+        when "c", "v", "z", "y", "a", "x"
             if love.keyboard.isDown("lctrl", "rctrl", "lgui", "rgui")
-                if love.keyboard.isDown("c")
-                    love.system.setClipboardText(@end_cursor and @get_substring(@pos, @end_pos) or "")
+                if love.keyboard.isDown("c") and not isrepeat
+                    if @end_pos and @end_pos ~= @pos
+                        love.system.setClipboardText(@get_chars(@pos, @end_pos))
                 elseif love.keyboard.isDown("v")
                     text = love.system.getClipboardText()
                     text = text\gsub("\r", "")\gsub("\t", " ")
                     if @end_cursor
+                        @add_to_history(Replace(@pos, @end_pos, text, @get_chars(@pos, @end_pos)))
                         @replace(@pos, @end_pos, text)
                     else
-                        @insert_string(text)
-
-M.delete = (i, j) =>
-    if i > j
-        i, j = j, i
-    p1, p2 = utf8.offset(@text, i), utf8.offset(@text, j)
-    @text = @text\sub(1, p1 - 1) .. @text\sub(p2)
-    @wrap_text()
-    @end_cursor, @end_pos = nil
-    @pos = i
-    @cursor = @pos_to_cur(@pos)
-
-M.replace = (i, j, s) =>
-    if i > j
-        i, j = j, i
-    p1, p2 = utf8.offset(@text, i), utf8.offset(@text, j)
-    @text = @text\sub(1, p1 - 1) .. s .. @text\sub(p2)
-    @wrap_text()
-    @end_cursor, @end_pos = nil
-    @pos = i + utf8.len(s)
-    @cursor = @pos_to_cur(@pos)
-
-M.get_substring = (i, j) =>
-    if i > j
-        i, j = j, i
-    p1, p2 = utf8.offset(@text, i), utf8.offset(@text, j)
-    return @text\sub(p1, p2 - 1)
-
+                        @add_to_history(Insert(@pos, text))
+                        @insert_string(@pos, text)
+                elseif love.keyboard.isDown("x") and not isrepeat
+                    if @end_pos and @end_pos ~= @pos
+                        text = @get_chars(@pos, @end_pos)
+                        love.system.setClipboardText(text)
+                        @add_to_history(Replace(@pos, @end_pos, "", text))
+                        @replace(@pos, @end_pos, "")
+                elseif love.keyboard.isDown("z")
+                    if action = @history.current
+                        action\undo()
+                        @history.current = action.previous
+                        @history.num_next += 1
+                elseif love.keyboard.isDown("y")
+                    action = if @history.current
+                        @history.current.next
+                    else
+                        @history.last
+                    
+                    if action 
+                        action\redo()
+                        @history.current = action
+                        @history.num_next -= 1
+                elseif love.keyboard.isDown("a") and not isrepeat
+                    len = utf8.len(@text)
+                    if len > 0
+                        @pos = 1
+                        @end_pos = len + 1
+                        @cursor = @pos_to_cur(@pos)
+                        @end_cursor = @pos_to_cur(@end_pos)
+                
 M.textinput = (t) =>
+    return unless @released
     if @end_cursor
+        @add_to_history(Replace(@pos, @end_pos, t, @get_chars(@pos, @end_pos)))
         @replace(@pos, @end_pos, t)
     else
-        @insert_string(t)
+        subtype = switch t
+            when " "
+                "space"
+            else
+                "other"
+        if @history.num_next == 0 and @history.current and @history.current.__class == Insert and @history.current.type == subtype
+            @history.current\add_char(t)
+        else
+            @add_to_history(Insert(@pos, t, subtype))
+        @insert_string(@pos, t)
 
-M.insert_string = (s) =>
-    p = utf8.offset(@text, @pos)
-    @text = @text\sub(1, p - 1) .. s .. @text\sub(p)
-    @wrap_text()
-    @pos += utf8.len(s)
-    @cursor = @pos_to_cur(@pos)
-
+--- CURSOR ---
 
 M.find_position = (x, y) =>
     return unless @x
@@ -293,9 +353,112 @@ M.pos_to_cur = (pos) =>
     cursor.cursor = utf8.len(@wrappedtext[#@wrappedtext])
     return cursor
 
+M.get_chars = (i, j=i+1) =>
+    if i > j
+        i, j = j, i
+    p1, p2 = utf8.offset(@text, i), utf8.offset(@text, j)
+    return utf8.char(utf8.codepoint(@text, p1, p2 - 1))
 
+--- EDIT ---
+
+M.replace = (i, j, s, cursor_at_beginning=false) =>
+    if i > j
+        i, j = j, i
+    p1, p2 = utf8.offset(@text, i), utf8.offset(@text, j)
+    @text = @text\sub(1, p1 - 1) .. s .. @text\sub(p2)
+    @wrap_text()
+    @end_cursor, @end_pos = nil
+    @pos = cursor_at_beginning and i or i + utf8.len(s)
+    @cursor = @pos_to_cur(@pos)
+
+M.delete_backspace = (pos, len) =>
+    @replace(pos - len, pos, "", true)
+
+M.delete_delete = (pos, len) =>
+    @replace(pos, pos + len, "")
+
+M.insert_string = (pos, s, cursor_at_beginning) =>
+    @replace(pos, pos, s, cursor_at_beginning)
+
+--- HISTORY ---
+
+Delete_backspace = Class {
+    __init: (@pos, char, subtype) =>
+        @type = subtype
+        @chars = char
+        @len = 1
+
+    add_char: (char) =>
+        @chars = char .. @chars
+        @len += 1
     
+    redo: =>
+        M\delete_backspace(@pos, @len)
 
+    undo: =>
+        M\insert_string(@pos - @len, @chars)
+}
 
+Delete_delete = Class {
+    __init: (@pos, char, subtype) =>
+        @type = subtype
+        @chars = char
+        @len = 1
+
+    add_char: (char) =>
+        @chars = @chars .. char
+        @len += 1
+    
+    redo: =>
+        M\delete_delete(@pos, @len)
+
+    undo: =>
+        M\insert_string(@pos, @chars, true)
+}
+
+Insert = Class {
+    __init: (@pos, text, subtype) =>
+        @type = subtype
+        @chars = text
+        @len = utf8.len(text)
+
+    add_char: (char) =>
+        @chars = @chars .. char
+        @len += 1
+    
+    redo: =>
+        M\insert_string(@pos, @chars)
+
+    undo: =>
+        M\delete_delete(@pos, @len)
+}
+
+Replace = Class {
+    __init: (@pos1, @pos2, @newtext, @oldtext) =>
+        @len = utf8.len(newtext)
+    
+    redo: =>
+        M\replace(@pos1, @pos2, @newtext)
+
+    undo: =>
+        M\replace(@pos1, @pos1 + @len, @oldtext)
+}
+    
+M.add_to_history = (action) =>
+    if previous = @history.current
+        action.previous = previous
+        previous.next = action
+        @history.len = @history.len + 1 - @history.num_next
+        if @history.len > MAX_HISTORY
+            newlast = @history.last.next
+            newlast.previous = nil
+            @history.last = newlast
+            @history.len = MAX_HISTORY
+    else
+        @history.len = 1
+        @history.last = action
+    
+    @history.num_next = 0
+    @history.current = action
 
 return M
